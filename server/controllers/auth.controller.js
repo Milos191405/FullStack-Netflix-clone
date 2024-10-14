@@ -2,6 +2,7 @@
 
 import { User } from "../models/user.model.js";
 import bcrypt from "bcrypt";
+import { generateTokenAndSendCookie } from "../utils/generateToken.js";
 
 // Signup function
 export async function signup(req, res) {
@@ -20,32 +21,26 @@ export async function signup(req, res) {
     }
 
     if (password.length < 6) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Password must be at least 6 characters",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
     }
 
     const existingUserByEmail = await User.findOne({ email });
     if (existingUserByEmail) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "User with this email already exists",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "User with this email already exists",
+      });
     }
 
     const existingUserByUsername = await User.findOne({ username });
     if (existingUserByUsername) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "User with this username already exists",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "User with this username already exists",
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -61,9 +56,14 @@ export async function signup(req, res) {
       image,
     });
 
-    await newUser.save();
+    // Save the new user to the database and send a response
+      await newUser.save();
+      generateTokenAndSendCookie(res, newUser._id);
+
+    // Remove password from the response object
     const { password: _, ...userWithoutPassword } = newUser._doc;
 
+    // Send success response with user data (excluding password)
     res.status(201).json({
       success: true,
       user: userWithoutPassword,
@@ -74,12 +74,59 @@ export async function signup(req, res) {
   }
 }
 
+
 // Login function
 export async function login(req, res) {
-  res.send("Login Route");
+  try {
+    const { email, password } = req.body;
+
+    // Validate input fields
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "All fields are required" });
+    }
+
+    // Find the user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid credentials" });
+    }
+
+    // Check if the provided password matches the hashed password
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    if (!isPasswordCorrect) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid credentials" });
+    }
+
+    // Generate a token and send it as a cookie
+    generateTokenAndSendCookie(res, user._id); // Pass 'res' first, then 'user._id'
+
+    // Send success response with user data (excluding password)
+    const { password: _, ...userWithoutPassword } = user._doc; // Leave this as you wrote
+    res.status(200).json({
+      success: true,
+      user: userWithoutPassword, // Response with user data
+    });
+  } catch (error) {
+    console.log("Error in login controller: ", error.message);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 }
+
 
 // Logout function
 export async function logout(req, res) {
-  res.send("Logout Route");
-}
+    try {
+        res.clearCookie("jwt-netflix");
+        return res.status(200).json({ success: true, message: "Logged out successfully" });
+      
+    } catch (error) {
+        console.log("Error in logout controller: ", error.message);
+        res.status(500).json({ success: false, message: "Internal server error" });
+        }
+  }
